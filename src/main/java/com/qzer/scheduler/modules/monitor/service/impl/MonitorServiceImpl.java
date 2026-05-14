@@ -3,6 +3,8 @@ package com.qzer.scheduler.modules.monitor.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.qzer.scheduler.common.utils.RedisUtil;
 import com.qzer.scheduler.modules.alarm.entity.AlarmRecord;
 import com.qzer.scheduler.modules.alarm.mapper.AlarmRecordMapper;
 import com.qzer.scheduler.modules.monitor.service.MonitorService;
@@ -20,6 +22,7 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @Service
@@ -29,9 +32,18 @@ public class MonitorServiceImpl implements MonitorService {
     private final TaskLogMapper taskLogMapper;
     private final AlarmRecordMapper alarmRecordMapper;
     private final TaskInfoMapper taskInfoMapper;
+    private final RedisUtil redisUtil;
+    private final ObjectMapper objectMapper;
+
+    private static final String STATISTICS_CACHE_KEY = "monitor:statistics";
+    private static final long CACHE_EXPIRE_TIME = 5;
 
     @Override
     public Map<String, Object> getStatistics() {
+        Object cached = redisUtil.get(STATISTICS_CACHE_KEY);
+        if (cached != null) {
+            return objectMapper.convertValue(cached, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
+        }
         Map<String, Object> statistics = new HashMap<>();
 
         long totalTaskCount = taskInfoMapper.selectCount(null);
@@ -73,6 +85,7 @@ public class MonitorServiceImpl implements MonitorService {
         statistics.put("todayExecuteCount", todayExecuteCount);
         statistics.put("todayFailCount", todayFailCount);
 
+        redisUtil.set(STATISTICS_CACHE_KEY, statistics, CACHE_EXPIRE_TIME, TimeUnit.MINUTES);
         return statistics;
     }
 

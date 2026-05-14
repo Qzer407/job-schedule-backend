@@ -3,6 +3,9 @@ package com.qzer.scheduler.modules.task.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.qzer.scheduler.common.utils.RedisUtil;
 import com.qzer.scheduler.modules.task.dto.TaskCreateRequest;
 import com.qzer.scheduler.modules.task.dto.TaskUpdateRequest;
 import com.qzer.scheduler.modules.task.entity.TaskInfo;
@@ -16,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @Service
@@ -24,6 +28,12 @@ public class TaskServiceImpl implements TaskService {
 
     private final TaskInfoMapper taskInfoMapper;
     private final XxlJobAdminService xxlJobAdminService;
+    private final RedisUtil redisUtil;
+    private final ObjectMapper objectMapper;
+
+    private static final String TASK_LIST_CACHE_KEY = "task:list:";
+    private static final String TASK_DETAIL_CACHE_KEY = "task:detail:";
+    private static final long CACHE_EXPIRE_TIME = 30;
 
     @Override
     @Transactional
@@ -44,6 +54,7 @@ public class TaskServiceImpl implements TaskService {
         taskInfo.setUpdateTime(LocalDateTime.now());
 
         taskInfoMapper.insert(taskInfo);
+        clearTaskCache();
         log.info("创建任务成功: {}", taskInfo.getId());
         return taskInfo;
     }
@@ -92,6 +103,7 @@ public class TaskServiceImpl implements TaskService {
         taskInfo.setUpdateTime(LocalDateTime.now());
 
         taskInfoMapper.updateById(taskInfo);
+        clearTaskCache();
         log.info("更新任务成功: {}", id);
         return taskInfo;
     }
@@ -104,16 +116,31 @@ public class TaskServiceImpl implements TaskService {
             throw new RuntimeException("任务不存在");
         }
         taskInfoMapper.deleteById(id);
+        clearTaskCache();
         log.info("删除任务成功: {}", id);
     }
 
     @Override
     public TaskInfo getTaskById(Long id) {
-        return taskInfoMapper.selectById(id);
+        String cacheKey = TASK_DETAIL_CACHE_KEY + id;
+        Object cached = redisUtil.get(cacheKey);
+        if (cached != null) {
+            return objectMapper.convertValue(cached, TaskInfo.class);
+        }
+        TaskInfo taskInfo = taskInfoMapper.selectById(id);
+        if (taskInfo != null) {
+            redisUtil.set(cacheKey, taskInfo, CACHE_EXPIRE_TIME, TimeUnit.MINUTES);
+        }
+        return taskInfo;
     }
 
     @Override
     public IPage<TaskInfo> listTasks(Page<TaskInfo> page, String taskName, String taskGroup, Integer status) {
+        String cacheKey = TASK_LIST_CACHE_KEY + page.getCurrent() + ":" + page.getSize() + ":" + taskName + ":" + taskGroup + ":" + status;
+        Object cached = redisUtil.get(cacheKey);
+        if (cached != null) {
+            return objectMapper.convertValue(cached, new TypeReference<IPage<TaskInfo>>() {});
+        }
         LambdaQueryWrapper<TaskInfo> wrapper = new LambdaQueryWrapper<>();
         if (StringUtils.hasText(taskName)) {
             wrapper.like(TaskInfo::getTaskName, taskName);
@@ -125,7 +152,9 @@ public class TaskServiceImpl implements TaskService {
             wrapper.eq(TaskInfo::getStatus, status);
         }
         wrapper.orderByDesc(TaskInfo::getCreateTime);
-        return taskInfoMapper.selectPage(page, wrapper);
+        IPage<TaskInfo> result = taskInfoMapper.selectPage(page, wrapper);
+        redisUtil.set(cacheKey, result, CACHE_EXPIRE_TIME, TimeUnit.MINUTES);
+        return result;
     }
 
     @Override
@@ -138,6 +167,7 @@ public class TaskServiceImpl implements TaskService {
         taskInfo.setUpdateTime(LocalDateTime.now());
         taskInfoMapper.updateById(taskInfo);
         xxlJobAdminService.startJob(id);
+        clearTaskCache();
         log.info("启动任务成功: {}", id);
     }
 
@@ -151,7 +181,19 @@ public class TaskServiceImpl implements TaskService {
         taskInfo.setUpdateTime(LocalDateTime.now());
         taskInfoMapper.updateById(taskInfo);
         xxlJobAdminService.stopJob(id);
+        clearTaskCache();
         log.info("停止任务成功: {}", id);
+    }
+
+    private void clearTaskCache() {
+        Set<String> keys = redisUtil.keys(TASK_LIST_CACHE_KEY + "*");
+        if (keys != null && !keys.isEmpty()) {
+            redisUtil.delete(keys);
+        }
+        keys = redisUtil.keys(TASK_DETAIL_CACHE_KEY + "*");
+        if (keys != null && !keys.isEmpty()) {
+            redisUtil.delete(keys);
+        }
     }
 
     @Override
