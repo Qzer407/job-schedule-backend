@@ -1,0 +1,43 @@
+spring:
+  application:
+    name: job-scheduler
+  datasource:
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:task_scheduler}?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      minimum-idle: 5
+      maximum-pool-size: 20
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      connection-timeout: 30000
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      id-type: auto
+
+xxl:
+  job:
+    admin:
+      addresses: ${XXL_JOB_ADMIN_ADDRESSES:http://127.0.0.1:8081/xxl-job-admin}
+    executor:
+      appname: ${XXL_JOB_EXECUTOR_APPNAME:job-scheduler-executor}
+      ip: ${XXL_JOB_EXECUTOR_IP:}
+      port: ${XXL_JOB_EXECUTOR_PORT:9999}
+      logpath: ${XXL_JOB_LOG_PATH:/tmp/xxl-job/jobhandler}
+      logretentiondays: ${XXL_JOB_LOG_RETENTION_DAYS:30}
+    accessToken: ${XXL_JOB_ACCESS_TOKEN:}
+
+jwt:
+  secret: ${JWT_SECRET:}
+  expiration: ${JWT_EXPIRATION:86400000}
+
+logging:
+  level:
+    com.qzer.scheduler: ${LOG_LEVEL:DEBUG}
+    com.xxl.job: ${LOG_LEVEL:DEBUG}
